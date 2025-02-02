@@ -2,6 +2,7 @@ import torch
 import math
 import torch.nn.functional as F
 from kornia.geometry.transform import pyrdown, pyrup
+import torch.nn.utils.rnn as rnn_utils
 
 class TorchFovea(torch.nn.Module):
     def __init__(self, imgsize, sigma, level=5, factor=2.0, device=torch.device('cuda')):
@@ -53,9 +54,9 @@ class TorchFovea(torch.nn.Module):
             im_lap = curImg - im_up
             image_pyrmid.append(im_lap)
             curImg = im_down
-        return image_pyrmid, im_up
+        return image_pyrmid, im_up           
 
-
+    # Adjusted foveate function
     def foveate(self, images, fixations):
         batchsize, channel = images.size(0), images.size(1)
         image_pyrmid, im_smallest = self.create_pyramid_images(images)
@@ -68,6 +69,11 @@ class TorchFovea(torch.nn.Module):
             rect = self.filter_sizes[i].repeat(batchsize, 1) / 2.0 - fix
             rect = rect.to(torch.int64)  # (B, 2)
 
+            x1 = rect[:, 0]
+            x2 = rect[:, 0] + image_sizes[i][0] 
+            y1 = rect[:, 1]
+            y2 = rect[:, 1] + image_sizes[i][1]
+
             # Crop the filter with size mismatches handled
             kernel_rect = [self.filters[i][y1[j]:y2[j], x1[j]:x2[j]] for j in range(batchsize)]
             
@@ -78,7 +84,7 @@ class TorchFovea(torch.nn.Module):
                 F.pad(k, (0, max_width - k.shape[1], 0, max_height - k.shape[0]), "constant", 0) for k in kernel_rect
             ]
             
-            kernel_rect = torch.stack(kernel_rect_padded).unsqueeze(1)
+            kernel_rect = torch.stack(kernel_rect_padded).unsqueeze(1)  # ✅ Now all tensors are the same size
             # filtering
             kernel_rect = F.interpolate(kernel_rect, [image_sizes[i][1], image_sizes[i][0]])
             im_filtered = image_pyrmid[i] * kernel_rect.repeat(1, channel, 1, 1)
