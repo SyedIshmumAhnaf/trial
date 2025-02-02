@@ -57,30 +57,28 @@ class TorchFovea(torch.nn.Module):
 
 
     def foveate(self, images, fixations):
-        """
-        images: (B, C, H, W)
-        fixations: (B, 2)
-        """
-        # build image pyramid
         batchsize, channel = images.size(0), images.size(1)
         image_pyrmid, im_smallest = self.create_pyramid_images(images)
         image_sizes = [[image_pyrmid[i].size(3), image_pyrmid[i].size(2)] for i in range(self.level)]
 
-        # foveation
+        # Foveation processing
         fovea_image = im_smallest.clone()
         for i in range(self.level-1, -1, -1):
             fix = fixations / math.pow(2, i)
-            rect = self.filter_sizes[i].repeat(images.size(0), 1) / 2.0 - fix
+            rect = self.filter_sizes[i].repeat(batchsize, 1) / 2.0 - fix
             rect = rect.to(torch.int64)  # (B, 2)
-            # crop the filter
-            x1 = rect[:, 0]
-            x2 = rect[:, 0] + image_sizes[i][0] 
-            y1 = rect[:, 1]
-            y2 = rect[:, 1] + image_sizes[i][1]
+
+            # Crop the filter with size mismatches handled
             kernel_rect = [self.filters[i][y1[j]:y2[j], x1[j]:x2[j]] for j in range(batchsize)]
-            for j in range(batchsize):
-                print(f"Shape of tensor {j}: {self.filters[i][y1[j]:y2[j], x1[j]:x2[j]].shape}")
-            kernel_rect = torch.stack(kernel_rect).unsqueeze(1)  # expand channel dimension  # (B, 1, 480, 639)
+            
+            # ✅ Pad sequences to the largest shape
+            max_height = max(k.shape[0] for k in kernel_rect)
+            max_width = max(k.shape[1] for k in kernel_rect)
+            kernel_rect_padded = [
+                F.pad(k, (0, max_width - k.shape[1], 0, max_height - k.shape[0]), "constant", 0) for k in kernel_rect
+            ]
+            
+            kernel_rect = torch.stack(kernel_rect_padded).unsqueeze(1)
             # filtering
             kernel_rect = F.interpolate(kernel_rect, [image_sizes[i][1], image_sizes[i][0]])
             im_filtered = image_pyrmid[i] * kernel_rect.repeat(1, channel, 1, 1)
